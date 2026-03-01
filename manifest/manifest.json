@@ -1,0 +1,64 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "<<YOUR_APP_GUID>>",
+  "developer": {
+    "name": "<<YOUR_COMPANY_NAME>>",
+    "websiteUrl": "https://<<YOUR_DOMAIN>>",
+    "privacyUrl": "https://<<YOUR_DOMAIN>>/privacy",
+    "termsOfUseUrl": "https://<<YOUR_DOMAIN>>/terms"
+  },
+  "name": {
+    "short": "MarkUp",
+    "full": "MarkUp for Teams – Viewer Annotation"
+  },
+  "description": {
+    "short": "Draw on shared content during calls",
+    "full": "MarkUp for Teams lets you annotate over shared screen content during meetings with pens, arrows, and laser pointers — synced in real-time for everyone."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#6264A7",
+
+  "configurableTabs": [
+    {
+      "configurationUrl": "https://<<YOUR_DOMAIN>>/config",
+      "canUpdateConfiguration": false,
+      "scopes": ["groupchat", "team"],
+      "context": [
+        "meetingSidePanel",
+        "meetingStage"
+      ]
+    }
+  ],
+
+  "validDomains": [
+    "<<YOUR_DOMAIN>>"
+  ],
+
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        {
+          "name": "LiveShareSession.ReadWrite.Chat",
+          "type": "Delegated"
+        },
+        {
+          "name": "LiveShareSession.ReadWrite.Group",
+          "type": "Delegated"
+        },
+        {
+          "name": "MeetingStage.Write.Chat",
+          "type": "Delegated"
+        },
+        {
+          "name": "ChannelMeetingStage.Write.Group",
+          "type": "Delegated"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MarkUp — Screen Capture</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #1e1e2e;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      background: #2d2d40;
+      border-radius: 12px;
+      padding: 32px;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    h1 { font-size: 20px; margin-bottom: 8px; }
+    .subtitle { font-size: 14px; opacity: 0.7; margin-bottom: 24px; }
+    .btn {
+      display: inline-block;
+      padding: 12px 28px;
+      border-radius: 8px;
+      border: none;
+      font-size: 15px;
+      font-family: 'Segoe UI', sans-serif;
+      cursor: pointer;
+      color: #fff;
+      transition: transform 0.1s, opacity 0.15s;
+      margin: 6px;
+    }
+    .btn:hover { opacity: 0.9; transform: scale(1.02); }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: #4a6cf7; }
+    .btn-live { background: #c0392b; }
+    .btn-stop { background: #555; }
+    .status {
+      margin-top: 16px;
+      font-size: 13px;
+      opacity: 0.8;
+      min-height: 20px;
+    }
+    .status.error { color: #e74c3c; opacity: 1; }
+    .status.success { color: #2ecc71; opacity: 1; }
+    .live-indicator {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #e74c3c;
+      animation: pulse 1s infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .controls { margin-top: 16px; }
+    .hint {
+      margin-top: 20px;
+      padding: 12px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      font-size: 12px;
+      opacity: 0.6;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>&#x1F4F8; Markup Screen Capture</h1>
+    <p class="subtitle">Share your screen to the annotation canvas</p>
+
+    <div id="controls-idle" class="controls">
+      <button class="btn btn-primary" onclick="captureOnce()">
+        &#x1F4F8; Capture Once
+      </button>
+      <button class="btn btn-live" onclick="startLive()">
+        &#x1F534; Go Live
+      </button>
+    </div>
+
+    <div id="controls-live" class="controls" style="display:none">
+      <p>
+        <span class="live-indicator"></span>
+        <strong>Live sharing</strong> &mdash; updating every
+        <span id="interval-display">5</span>s
+      </p>
+      <button class="btn btn-stop" onclick="stopLive()" style="margin-top:12px">
+        &#x23F9; Stop Sharing
+      </button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="hint">
+      This window captures your screen and sends it to the MarkUp canvas.<br>
+      You can minimise this window &mdash; sharing will continue in the background.
+    </div>
+  </div>
+
+  <script>
+    /* ── postMessage to opener (the Teams iframe that opened this popup) ── */
+    /* BroadcastChannel does NOT work here because Chrome partitions it     */
+    /* by top-level site. The iframe is under teams.microsoft.com while     */
+    /* this popup is top-level at our SWA domain — different partitions.    */
+    var opener   = window.opener;
+    var params   = new URLSearchParams(window.location.search);
+    var refreshInterval = parseInt(params.get('interval') || '5', 10);
+    var targetOrigin = params.get('origin') || window.location.origin;
+
+    var stream     = null;
+    var video      = null;
+    var liveTimer  = null;
+    var frameCount = 0;
+
+    document.getElementById('interval-display').textContent = refreshInterval;
+
+    function sendToOpener(data) {
+      if (opener && !opener.closed) {
+        opener.postMessage(data, targetOrigin);
+      } else {
+        setStatus('Connection to MarkUp lost. Close this window and try again.', 'error');
+      }
+    }
+
+    function setStatus(msg, type) {
+      var el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = 'status' + (type ? ' ' + type : '');
+    }
+
+    function showIdle() {
+      document.getElementById('controls-idle').style.display = '';
+      document.getElementById('controls-live').style.display = 'none';
+    }
+
+    function showLive() {
+      document.getElementById('controls-idle').style.display = 'none';
+      document.getElementById('controls-live').style.display = '';
+    }
+
+    function getStream() {
+      return navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 2, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+    }
+
+    function grabFrame(videoEl) {
+      if (!videoEl || !videoEl.videoWidth) return null;
+      var w = videoEl.videoWidth;
+      var h = videoEl.videoHeight;
+      var maxW = 1920, maxH = 1080;
+      if (w > maxW || h > maxH) {
+        var r = Math.min(maxW / w, maxH / h);
+        w = Math.round(w * r);
+        h = Math.round(h * r);
+      }
+      var canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(videoEl, 0, 0, w, h);
+      return canvas.toDataURL('image/jpeg', 0.85);
+    }
+
+    /* ── One-shot capture ──────────────────────────────────────────────── */
+    function captureOnce() {
+      setStatus('Requesting screen access\u2026');
+      getStream().then(function (s) {
+        var v = document.createElement('video');
+        v.srcObject = s;
+        v.muted = true;
+        return v.play().then(function () {
+          return new Promise(function (resolve) { setTimeout(resolve, 400); });
+        }).then(function () {
+          var dataUrl = grabFrame(v);
+          s.getTracks().forEach(function (t) { t.stop(); });
+          v.srcObject = null;
+          if (dataUrl) {
+            sendToOpener({ type: 'markup-capture', dataUrl: dataUrl });
+            setStatus('\u2705 Screenshot sent to canvas!', 'success');
+          } else {
+            setStatus('Failed to capture frame.', 'error');
+          }
+        });
+      }).catch(function (err) {
+        if (err.name === 'NotAllowedError') {
+          setStatus('Screen capture was cancelled.', 'error');
+        } else {
+          setStatus('Error: ' + err.message, 'error');
+        }
+      });
+    }
+
+    /* ── Go Live (continuous capture) ──────────────────────────────────── */
+    function startLive() {
+      setStatus('Requesting screen access\u2026');
+      getStream().then(function (s) {
+        stream = s;
+        video  = document.createElement('video');
+        video.srcObject = stream;
+        video.muted = true;
+        return video.play().then(function () {
+          return new Promise(function (resolve) { setTimeout(resolve, 400); });
+        }).then(function () {
+          /* track ended = user clicked browser's "Stop sharing" */
+          stream.getVideoTracks()[0].addEventListener('ended', function () {
+            stopLive();
+          });
+
+          var first = grabFrame(video);
+          if (first) {
+            sendToOpener({ type: 'markup-capture', dataUrl: first });
+            frameCount = 1;
+          }
+
+          liveTimer = setInterval(function () {
+            var frame = grabFrame(video);
+            if (frame) {
+              sendToOpener({ type: 'markup-capture', dataUrl: frame });
+              frameCount++;
+              setStatus('\uD83D\uDD34 Live \u2014 ' + frameCount + ' frames sent', 'success');
+            }
+          }, refreshInterval * 1000);
+
+          showLive();
+          setStatus('\uD83D\uDD34 Live \u2014 sharing started', 'success');
+        });
+      }).catch(function (err) {
+        if (err.name === 'NotAllowedError') {
+          setStatus('Screen capture was cancelled.', 'error');
+        } else {
+          setStatus('Error: ' + err.message, 'error');
+        }
+      });
+    }
+
+    /* ── Stop live ─────────────────────────────────────────────────────── */
+    function stopLive() {
+      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+      if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+      if (video) { video.srcObject = null; video = null; }
+      frameCount = 0;
+      showIdle();
+      setStatus('Sharing stopped.');
+    }
+
+    /* ── Cleanup on close ──────────────────────────────────────────────── */
+    window.addEventListener('beforeunload', function () {
+      stopLive();
+      sendToOpener({ type: 'markup-closed' });
+    });
+
+    /* ── Respond to ping from main app ─────────────────────────────────── */
+    window.addEventListener('message', function (e) {
+      if (e.data && e.data.type === 'markup-ping') {
+        sendToOpener({ type: 'markup-pong' });
+      }
+    });
+  </script>
+</body>
+</html>
