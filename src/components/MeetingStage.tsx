@@ -13,7 +13,14 @@
 
 import React, { useRef, useEffect, useCallback, useState } from "react";
 import { InkingTool } from "@microsoft/live-share-canvas";
-import { useLiveAnnotation, BreadcrumbPin, ClickRipple, FocusZone } from "../hooks/useLiveAnnotation";
+import {
+  useLiveAnnotation,
+  BreadcrumbPin,
+  ClickRipple,
+  FocusZone,
+  PresenceUser,
+  formatTimer,
+} from "../hooks/useLiveAnnotation";
 import { AnnotationToolbar } from "./AnnotationToolbar";
 import { ScreenCaptureButton } from "./ScreenCaptureButton";
 
@@ -57,6 +64,27 @@ export function MeetingStage() {
     sendClick,
     focusZone,
     setFocusZone,
+    // Feature 1: LivePresence
+    presenceUsers,
+    updateCursor,
+    localUserName,
+    localUserColor,
+    // Feature 2: LiveEvent — attention
+    sendAttentionRequest,
+    lastAttentionRequest,
+    // Feature 3: LiveFollowMode
+    isPresenting,
+    presenterName,
+    isSuspended,
+    startPresenting,
+    stopPresenting,
+    toggleSuspend,
+    // Feature 5: LiveTimer
+    timerMilliRemaining,
+    timerIsRunning,
+    startTimer,
+    pauseTimer,
+    playTimer,
   } = useLiveAnnotation(canvasHostRef);
 
   const canAnnotate = currentRole === "annotator";
@@ -64,6 +92,7 @@ export function MeetingStage() {
   // ── Active mode state ───────────────────────────────────────────────────
   const [activeMode, setActiveMode] = useState<"none" | "pin" | "focus">("none");
   const [focusDrag, setFocusDrag] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null);
+  const lastCursorUpdateRef = useRef(0);
 
   // ── Global paste listener ───────────────────────────────────────────────
   const handlePaste = useCallback(
@@ -139,6 +168,28 @@ export function MeetingStage() {
     const pct = toPct(e);
     if (!pct) return;
     setFocusDrag({ startX: pct.xPct, startY: pct.yPct, curX: pct.xPct, curY: pct.yPct });
+  }
+
+  /** Unified mouse-move: cursor presence + focus-drag */
+  function handleGlobalMouseMove(e: React.MouseEvent) {
+    // Throttled cursor presence update
+    const now = Date.now();
+    if (now - lastCursorUpdateRef.current >= 50) {
+      lastCursorUpdateRef.current = now;
+      const pct = toPct(e);
+      if (pct && pct.xPct >= 0 && pct.xPct <= 1 && pct.yPct >= 0 && pct.yPct <= 1) {
+        updateCursor(pct.xPct, pct.yPct);
+      }
+    }
+    // Focus-drag tracking
+    if (focusDrag) {
+      const pct = toPct(e);
+      if (pct) setFocusDrag({ ...focusDrag, curX: pct.xPct, curY: pct.yPct });
+    }
+  }
+
+  function handleCanvasMouseLeave() {
+    updateCursor(-1, -1); // clear cursor for remote viewers
   }
 
   function handleCanvasMouseMove(e: React.MouseEvent) {
@@ -268,6 +319,8 @@ export function MeetingStage() {
       <div
         ref={canvasContainerRef}
         style={{ ...styles.canvasContainer, ...zoomStyle, cursor: activeMode === "focus" ? "crosshair" : activeMode === "pin" ? "copy" : undefined }}
+        onMouseMove={handleGlobalMouseMove}
+        onMouseLeave={handleCanvasMouseLeave}
       >
         {backgroundImage ? (
           <img
@@ -375,11 +428,101 @@ export function MeetingStage() {
             }}
           />
         )}
+
+        {/* ── Feature 1: Remote user cursors ──────────────────────────── */}
+        {presenceUsers
+          .filter((u) => !u.isLocal && u.cursor && u.cursor.xPct >= 0 && u.cursor.yPct >= 0)
+          .map((u) => (
+            <div
+              key={u.userId}
+              style={{
+                position: "absolute" as const,
+                left: `${u.cursor!.xPct * 100}%`,
+                top: `${u.cursor!.yPct * 100}%`,
+                zIndex: 8,
+                pointerEvents: "none" as const,
+                transition: "left 0.1s linear, top 0.1s linear",
+              }}
+            >
+              <svg width="16" height="20" viewBox="0 0 16 20"
+                style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.4))" }}>
+                <path d="M0 0L16 12L8 12L4 20L0 0Z" fill={u.color} stroke="#fff" strokeWidth="1.5" />
+              </svg>
+              <div style={{
+                position: "absolute" as const, left: 14, top: 12,
+                background: u.color, color: "#fff",
+                padding: "1px 6px", borderRadius: 4,
+                fontSize: 10, fontWeight: 600, whiteSpace: "nowrap" as const,
+                boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+              }}>
+                {u.name}
+              </div>
+            </div>
+          ))}
       </div>
 
       {/* ── Connection status ──────────────────────────────────────────── */}
       {!isConnected && (
         <div style={styles.connectingBanner}>Connecting to Live Share…</div>
+      )}
+
+      {/* ── Feature 1: Presence roster (top-right) ─────────────────────── */}
+      {isConnected && presenceUsers.length > 0 && (
+        <div style={styles.presenceRoster}>
+          {presenceUsers.map((u) => (
+            <div
+              key={u.userId}
+              style={{
+                width: 26, height: 26, borderRadius: "50%",
+                background: u.color,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 11, fontWeight: 700, color: "#fff",
+                border: u.isLocal ? "2px solid #fff" : "2px solid transparent",
+                marginLeft: -4,
+                boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+              }}
+              title={`${u.name} (${u.role})`}
+            >
+              {u.name.charAt(0).toUpperCase()}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Feature 5: Timer display ───────────────────────────────────── */}
+      {(timerIsRunning || timerMilliRemaining > 0) && (
+        <div style={styles.timerDisplay}>
+          <SvgIcon d="M12 2v10l4.5 4.5" size={16} />
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            {formatTimer(timerMilliRemaining)}
+          </span>
+        </div>
+      )}
+
+      {/* ── Feature 3: Following presenter banner ──────────────────────── */}
+      {presenterName && !isPresenting && (
+        <div style={styles.followBanner}>
+          <SvgIcon d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" size={14} />
+          <span>
+            Following {presenterName}
+            {isSuspended && <span style={{ opacity: 0.6 }}> (paused)</span>}
+          </span>
+          <button
+            style={styles.modeCancel}
+            onClick={toggleSuspend}
+            title={isSuspended ? "Resume following" : "Pause following"}
+          >
+            {isSuspended ? "▶" : "⏸"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Feature 2: Attention request toast ─────────────────────────── */}
+      {lastAttentionRequest && (
+        <div style={styles.attentionToast}>
+          <SvgIcon d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" size={16} stroke="#f59e0b" />
+          <span>{lastAttentionRequest.senderName} is requesting attention</span>
+        </div>
       )}
 
       {/* ── Mode indicator ─────────────────────────────────────────────── */}
@@ -478,6 +621,51 @@ export function MeetingStage() {
               <SvgIcon d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3" />
               <span>Export</span>
             </button>
+
+            <div style={styles.powerSep} />
+
+            {/* ── Feature 5: Timer controls ────────────────────────────── */}
+            {!timerIsRunning && timerMilliRemaining === 0 && (
+              <>
+                <button style={styles.powerBtn} onClick={() => startTimer(60_000)} title="1-minute timer">
+                  <SvgIcon d="M12 2v10l4.5 4.5" size={14} />
+                  <span>1m</span>
+                </button>
+                <button style={styles.powerBtn} onClick={() => startTimer(180_000)} title="3-minute timer">
+                  <span>3m</span>
+                </button>
+                <button style={styles.powerBtn} onClick={() => startTimer(300_000)} title="5-minute timer">
+                  <span>5m</span>
+                </button>
+              </>
+            )}
+            {timerIsRunning && (
+              <button style={styles.powerBtn} onClick={pauseTimer} title="Pause timer">
+                <SvgIcon d="M6 4h4v16H6z M14 4h4v16h-4z" size={14} />
+                <span>Pause</span>
+              </button>
+            )}
+            {!timerIsRunning && timerMilliRemaining > 0 && (
+              <button style={styles.powerBtn} onClick={playTimer} title="Resume timer">
+                <SvgIcon d="M5 3l14 9-14 9V3z" size={14} />
+                <span>Resume</span>
+              </button>
+            )}
+
+            <div style={styles.powerSep} />
+
+            {/* ── Feature 3: Present toggle ────────────────────────────── */}
+            {!isPresenting ? (
+              <button style={styles.powerBtn} onClick={startPresenting} title="Start presenting (lock followers' view)">
+                <SvgIcon d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0" size={14} />
+                <span>Present</span>
+              </button>
+            ) : (
+              <button style={{ ...styles.powerBtn, ...styles.powerBtnActive }} onClick={stopPresenting} title="Stop presenting">
+                <SvgIcon d="M18 6L6 18 M6 6l12 12" size={14} />
+                <span>Stop</span>
+              </button>
+            )}
           </div>
 
           {/* Clear All */}
@@ -494,15 +682,38 @@ export function MeetingStage() {
         </div>
       )}
 
-      {/* ── Viewer badge ───────────────────────────────────────────────── */}
+      {/* ── Viewer badge + controls ──────────────────────────────────── */}
       {currentRole === "viewer" && isConnected && (
-        <div style={styles.viewerBadge}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:5,opacity:0.7}}>
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-          View only
+        <div style={styles.viewerControls}>
+          <div style={styles.viewerBadge}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:5,opacity:0.7}}>
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            View only
+          </div>
+
+          {/* Feature 2: Attention request button */}
+          <button
+            style={styles.attentionBtn}
+            onClick={sendAttentionRequest}
+            title="Request the presenter's attention"
+          >
+            <SvgIcon d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" size={14} />
+            <span>Attention</span>
+          </button>
+
+          {/* Feature 3: Suspend / resume following */}
+          {presenterName && (
+            <button
+              style={styles.attentionBtn}
+              onClick={toggleSuspend}
+              title={isSuspended ? "Resume following presenter" : "Pause following presenter"}
+            >
+              <span>{isSuspended ? "▶ Resume" : "⏸ Pause"}</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -524,6 +735,14 @@ export function MeetingStage() {
         @keyframes focusPulse {
           0%, 100% { border-color: rgba(99,102,241,0.5); }
           50%      { border-color: rgba(99,102,241,0.9); }
+        }
+        @keyframes attentionSlideIn {
+          0%   { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+          100% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        @keyframes timerPulse {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.7; }
         }
       `}</style>
     </div>
@@ -805,9 +1024,6 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
   },
   viewerBadge: {
-    position: "absolute",
-    top: 8,
-    right: 8,
     background: GLASS,
     backdropFilter: "blur(18px)",
     WebkitBackdropFilter: "blur(18px)",
@@ -818,7 +1034,119 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 500,
     fontFamily: "'Segoe UI', sans-serif",
-    zIndex: 10,
     letterSpacing: 0.3,
+    display: "flex",
+    alignItems: "center",
+  },
+  viewerControls: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    display: "flex",
+    gap: 6,
+    alignItems: "center",
+    zIndex: 10,
+  },
+
+  // ── Feature 1: Presence roster ──────────────────────────────────────
+  presenceRoster: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    display: "flex",
+    alignItems: "center",
+    zIndex: 10,
+    background: GLASS,
+    backdropFilter: "blur(18px)",
+    WebkitBackdropFilter: "blur(18px)",
+    borderRadius: 20,
+    padding: "4px 8px 4px 12px",
+    border: `1px solid ${GLASS_BORDER}`,
+  },
+
+  // ── Feature 2: Attention ────────────────────────────────────────────
+  attentionBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "5px 12px",
+    borderRadius: RADIUS,
+    border: "1px solid rgba(245,158,11,0.35)",
+    background: "rgba(245,158,11,0.12)",
+    color: "#fbbf24",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 500,
+    fontFamily: "'Segoe UI', sans-serif",
+    whiteSpace: "nowrap" as const,
+  },
+  attentionToast: {
+    position: "absolute",
+    top: 48,
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "rgba(245,158,11,0.2)",
+    backdropFilter: "blur(18px)",
+    WebkitBackdropFilter: "blur(18px)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#fde68a",
+    padding: "8px 18px",
+    borderRadius: RADIUS,
+    fontSize: 13,
+    fontWeight: 500,
+    fontFamily: "'Segoe UI', sans-serif",
+    zIndex: 12,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    animation: "attentionSlideIn 0.3s ease-out forwards",
+    boxShadow: "0 4px 16px rgba(245,158,11,0.25)",
+    whiteSpace: "nowrap" as const,
+  },
+
+  // ── Feature 3: Follow banner ────────────────────────────────────────
+  followBanner: {
+    position: "absolute",
+    top: 48,
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "rgba(99,102,241,0.2)",
+    backdropFilter: "blur(18px)",
+    WebkitBackdropFilter: "blur(18px)",
+    border: "1px solid rgba(99,102,241,0.35)",
+    color: "rgba(255,255,255,0.85)",
+    padding: "6px 16px",
+    borderRadius: 10,
+    fontSize: 13,
+    fontWeight: 500,
+    fontFamily: "'Segoe UI', sans-serif",
+    zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    whiteSpace: "nowrap" as const,
+  },
+
+  // ── Feature 5: Timer ────────────────────────────────────────────────
+  timerDisplay: {
+    position: "absolute",
+    top: 12,
+    right: 140,
+    background: GLASS,
+    backdropFilter: "blur(18px)",
+    WebkitBackdropFilter: "blur(18px)",
+    border: `1px solid ${GLASS_BORDER}`,
+    color: "#fff",
+    padding: "6px 14px",
+    borderRadius: RADIUS,
+    fontSize: 16,
+    fontWeight: 600,
+    fontFamily: "'Segoe UI', sans-serif",
+    zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    animation: "timerPulse 2s ease-in-out infinite",
+    letterSpacing: 1,
   },
 };
