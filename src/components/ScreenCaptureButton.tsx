@@ -6,7 +6,8 @@
 //   1. Try getDisplayMedia() DIRECTLY first — works if the browser/iframe allows it
 //   2. If blocked (Teams iframe permissions-policy), open a POPUP helper window
 //      at /capture.html. That window runs outside the iframe and can call
-//      getDisplayMedia() freely. It sends captured frames back via BroadcastChannel.
+//      getDisplayMedia() freely. It sends captured frames back via postMessage
+//      (BroadcastChannel is partitioned by top-level site in Chrome).
 //   3. Upload Image — always works (file picker)
 //   4. Ctrl+V Paste — handled by the global paste listener in MeetingStage.tsx
 //
