@@ -94,6 +94,10 @@ export function MeetingStage() {
   const [focusDrag, setFocusDrag] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null);
   const lastCursorUpdateRef = useRef(0);
 
+  // ── UI toggles ──────────────────────────────────────────────────────────
+  const [showTimerDropdown, setShowTimerDropdown] = useState(false);
+  const [showPeople, setShowPeople] = useState(false);
+
   // ── Global paste listener ───────────────────────────────────────────────
   const handlePaste = useCallback(
     async (e: ClipboardEvent) => {
@@ -466,26 +470,53 @@ export function MeetingStage() {
         <div style={styles.connectingBanner}>Connecting to Live Share…</div>
       )}
 
-      {/* ── Feature 1: Presence roster (top-right) ─────────────────────── */}
-      {isConnected && presenceUsers.length > 0 && (
-        <div style={styles.presenceRoster}>
-          {presenceUsers.map((u) => (
-            <div
-              key={u.userId}
-              style={{
-                width: 26, height: 26, borderRadius: "50%",
-                background: u.color,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 11, fontWeight: 700, color: "#fff",
-                border: u.isLocal ? "2px solid #fff" : "2px solid transparent",
-                marginLeft: -4,
-                boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
-              }}
-              title={`${u.name} (${u.role})`}
-            >
-              {u.name.charAt(0).toUpperCase()}
+      {/* ── Feature 1: People toggle + roster (top-right) ──────────────── */}
+      {isConnected && (
+        <div style={styles.peopleBtnArea}>
+          <button
+            style={{
+              ...styles.powerBtn,
+              ...(showPeople ? styles.powerBtnActive : {}),
+              position: "relative" as const,
+            }}
+            onClick={() => setShowPeople((p) => !p)}
+            title={showPeople ? "Hide people" : "Show people in session"}
+          >
+            <SvgIcon d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" size={14} />
+            <span>People</span>
+            {presenceUsers.length > 0 && (
+              <span style={styles.peopleBadge}>{presenceUsers.length}</span>
+            )}
+          </button>
+          {showPeople && presenceUsers.length > 0 && (
+            <div style={styles.presenceRoster}>
+              {presenceUsers.map((u) => (
+                <div
+                  key={u.userId}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "4px 0",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 24, height: 24, borderRadius: "50%",
+                      background: u.color,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 11, fontWeight: 700, color: "#fff",
+                      border: u.isLocal ? "2px solid #fff" : "2px solid transparent",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {u.name.charAt(0).toUpperCase()}
+                  </div>
+                  <span style={{ fontSize: 12, color: "#e2e8f0", whiteSpace: "nowrap" as const }}>
+                    {u.name}{u.isLocal ? " (you)" : ""}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -624,33 +655,44 @@ export function MeetingStage() {
 
             <div style={styles.powerSep} />
 
-            {/* ── Feature 5: Timer controls ────────────────────────────── */}
-            {!timerIsRunning && timerMilliRemaining === 0 && (
-              <>
-                <button style={styles.powerBtn} onClick={() => startTimer(60_000)} title="1-minute timer">
+            {/* ── Feature 5: Timer dropdown ───────────────────────────── */}
+            <div style={{ position: "relative" as const }}>
+              {!timerIsRunning && timerMilliRemaining === 0 && (
+                <button
+                  style={{ ...styles.powerBtn, ...(showTimerDropdown ? styles.powerBtnActive : {}) }}
+                  onClick={() => setShowTimerDropdown((p) => !p)}
+                  title="Start a timer"
+                >
                   <SvgIcon d="M12 2v10l4.5 4.5" size={14} />
-                  <span>1m</span>
+                  <span>Timer</span>
                 </button>
-                <button style={styles.powerBtn} onClick={() => startTimer(180_000)} title="3-minute timer">
-                  <span>3m</span>
+              )}
+              {timerIsRunning && (
+                <button style={styles.powerBtn} onClick={pauseTimer} title="Pause timer">
+                  <SvgIcon d="M6 4h4v16H6z M14 4h4v16h-4z" size={14} />
+                  <span>Pause</span>
                 </button>
-                <button style={styles.powerBtn} onClick={() => startTimer(300_000)} title="5-minute timer">
-                  <span>5m</span>
+              )}
+              {!timerIsRunning && timerMilliRemaining > 0 && (
+                <button style={styles.powerBtn} onClick={playTimer} title="Resume timer">
+                  <SvgIcon d="M5 3l14 9-14 9V3z" size={14} />
+                  <span>Resume</span>
                 </button>
-              </>
-            )}
-            {timerIsRunning && (
-              <button style={styles.powerBtn} onClick={pauseTimer} title="Pause timer">
-                <SvgIcon d="M6 4h4v16H6z M14 4h4v16h-4z" size={14} />
-                <span>Pause</span>
-              </button>
-            )}
-            {!timerIsRunning && timerMilliRemaining > 0 && (
-              <button style={styles.powerBtn} onClick={playTimer} title="Resume timer">
-                <SvgIcon d="M5 3l14 9-14 9V3z" size={14} />
-                <span>Resume</span>
-              </button>
-            )}
+              )}
+              {showTimerDropdown && !timerIsRunning && timerMilliRemaining === 0 && (
+                <div style={styles.timerDropdown}>
+                  {[{ label: "1 min", ms: 60_000 }, { label: "3 min", ms: 180_000 }, { label: "5 min", ms: 300_000 }, { label: "10 min", ms: 600_000 }].map((opt) => (
+                    <button
+                      key={opt.ms}
+                      style={styles.timerDropdownItem}
+                      onClick={() => { startTimer(opt.ms); setShowTimerDropdown(false); }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div style={styles.powerSep} />
 
@@ -1048,20 +1090,44 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 10,
   },
 
-  // ── Feature 1: Presence roster ──────────────────────────────────────
-  presenceRoster: {
+  // ── Feature 1: People toggle + roster ────────────────────────────────
+  peopleBtnArea: {
     position: "absolute",
     top: 8,
     right: 8,
+    zIndex: 10,
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  peopleBadge: {
+    position: "absolute" as const,
+    top: -4,
+    right: -4,
+    background: ACCENT,
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: 700,
+    borderRadius: "50%",
+    width: 16,
+    height: 16,
     display: "flex",
     alignItems: "center",
-    zIndex: 10,
+    justifyContent: "center",
+    lineHeight: 1,
+  },
+  presenceRoster: {
     background: GLASS,
     backdropFilter: "blur(18px)",
     WebkitBackdropFilter: "blur(18px)",
-    borderRadius: 20,
-    padding: "4px 8px 4px 12px",
+    borderRadius: RADIUS,
+    padding: "8px 12px",
     border: `1px solid ${GLASS_BORDER}`,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 2,
+    minWidth: 140,
   },
 
   // ── Feature 2: Attention ────────────────────────────────────────────
@@ -1148,5 +1214,35 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     animation: "timerPulse 2s ease-in-out infinite",
     letterSpacing: 1,
+  },
+  timerDropdown: {
+    position: "absolute" as const,
+    top: "100%",
+    left: 0,
+    marginTop: 4,
+    background: GLASS,
+    backdropFilter: "blur(18px)",
+    WebkitBackdropFilter: "blur(18px)",
+    border: `1px solid ${GLASS_BORDER}`,
+    borderRadius: RADIUS,
+    padding: 4,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 2,
+    zIndex: 20,
+    minWidth: 90,
+  },
+  timerDropdownItem: {
+    background: "transparent",
+    border: "none",
+    color: "#e2e8f0",
+    padding: "6px 12px",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 500,
+    fontFamily: "'Segoe UI', sans-serif",
+    textAlign: "left" as const,
+    transition: "background 0.15s",
   },
 };

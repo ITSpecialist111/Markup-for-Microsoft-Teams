@@ -172,7 +172,7 @@ export function useLiveAnnotation(
   const [presenterName, setPresenterName] = useState<string | null>(null);
   const [isSuspended, setIsSuspended] = useState(false);
 
-  // ── Feature 5: LiveTimer state ──────────────────────────────────────────
+  // ── Feature 5: Timer state (SharedMap-based) ───────────────────────────
   const [timerMilliRemaining, setTimerMilliRemaining] = useState(0);
   const [timerIsRunning, setTimerIsRunning] = useState(false);
 
@@ -185,8 +185,11 @@ export function useLiveAnnotation(
   const presenceMapRef = useRef(new Map<string, PresenceUser>());
   const liveEventRef = useRef<LiveEvent | null>(null);
   const pinStateRef = useRef<LiveState | null>(null);
-  const timerRef = useRef<LiveTimer | null>(null);
   const followModeRef = useRef<LiveFollowMode | null>(null);
+
+  // Timer refs (SharedMap-driven, not LiveTimer)
+  const timerEndAtRef = useRef(0);   // epoch ms when timer expires
+  const timerPausedRef = useRef(0);  // ms remaining when paused
 
   const localUserNameRef = useRef("Anonymous");
   const localUserColorRef = useRef(PRESENCE_COLORS[0]);
@@ -279,40 +282,42 @@ export function useLiveAnnotation(
           await (presence as any).initialize();
           presenceRef.current = presence;
 
-          (presence as any).update({
-            name: userName,
-            color: userColor,
-            role: "viewer", // updated after role resolution
-          });
-
           const refreshPresence = () => {
             if (cancelled) return;
             try {
               const all: PresenceUser[] = [];
-              const users =
-                typeof (presence as any).toArray === "function"
-                  ? (presence as any).toArray()
-                  : typeof (presence as any).getUsers === "function"
-                    ? (presence as any).getUsers()
-                    : [];
+              const users = (presence as any).getUsers
+                ? (presence as any).getUsers()
+                : [];
               for (const u of users) {
                 const d = u.data || {};
                 all.push({
                   userId: u.userId ?? "",
-                  name: d.name || "Anonymous",
-                  color: d.color || PRESENCE_COLORS[0],
+                  name: d.name || u.displayName || "Anonymous",
+                  color: d.color || PRESENCE_COLORS[Math.abs(hashCode(u.userId || "")) % PRESENCE_COLORS.length],
                   cursor: d.cursor,
                   role: d.role || "viewer",
                   isLocal: !!u.isLocalUser,
                 });
               }
               setPresenceUsers(all);
-            } catch {
-              /* ignore iteration errors */
+            } catch (err) {
+              console.warn("[Markup] refreshPresence error:", err);
             }
           };
 
+          // Attach listener BEFORE update() so we don't miss the first event
           (presence as any).on("presenceChanged", () => refreshPresence());
+
+          // Publish local user presence
+          await (presence as any).update({
+            name: userName,
+            color: userColor,
+            role: "viewer", // updated after role resolution
+          });
+
+          // Populate roster immediately (catches anyone already in session)
+          refreshPresence();
 
           console.log("[Markup] ✓ LivePresence initialised");
         } catch (err) {
@@ -394,34 +399,14 @@ export function useLiveAnnotation(
           console.warn("[Markup] ✗ LiveState:", err);
         }
 
-        // ── 7. LiveTimer ──────────────────────────────────────────────────
-        try {
-          await (timer as any).initialize();
-          timerRef.current = timer;
-
-          (timer as any).on("started", () => {
-            if (!cancelled) setTimerIsRunning(true);
-          });
-          (timer as any).on("finished", () => {
-            if (!cancelled) {
-              setTimerIsRunning(false);
-              setTimerMilliRemaining(0);
-            }
-          });
-          (timer as any).on("paused", () => {
-            if (!cancelled) setTimerIsRunning(false);
-          });
-          (timer as any).on("played", () => {
-            if (!cancelled) setTimerIsRunning(true);
-          });
-          (timer as any).on("onTick", (millis: number) => {
-            if (!cancelled) setTimerMilliRemaining(millis);
-          });
-
-          console.log("[Markup] ✓ LiveTimer initialised");
-        } catch (err) {
-          console.warn("[Markup] ✗ LiveTimer:", err);
-        }
+        // ── 7. Timer is SharedMap-based (see valueChanged handler below) ─
+        //    LiveTimer is kept in the schema for container compat but not used.
+        //    Timer keys: timer_endAt, timer_paused
+        const existingEndAt = Number(appState.get<string>("timer_endAt") || "0");
+        const existingPaused = Number(appState.get<string>("timer_paused") || "0");
+        timerEndAtRef.current = existingEndAt;
+        timerPausedRef.current = existingPaused;
+        console.log("[Markup] ✓ Timer (SharedMap-based) ready");
 
         // ── 8. LiveFollowMode (focus zone) ────────────────────────────────
         try {
@@ -482,6 +467,13 @@ export function useLiveAnnotation(
           if (changed.key === "backgroundImage") {
             const img = appState.get<string>("backgroundImage");
             setBackgroundImage(img || null);
+          }
+          // Timer keys (SharedMap-based timer)
+          if (changed.key === "timer_endAt") {
+            timerEndAtRef.current = Number(appState.get<string>("timer_endAt") || "0");
+          }
+          if (changed.key === "timer_paused") {
+            timerPausedRef.current = Number(appState.get<string>("timer_paused") || "0");
           }
           // Fallbacks when SDK DDS not available
           if (!followModeRef.current && changed.key === "focusZone") {
@@ -642,6 +634,31 @@ export function useLiveAnnotation(
       }
     };
   }, []); // Run once on mount
+
+  // ── Timer tick effect (SharedMap-based) ──────────────────────────────────
+  useEffect(() => {
+    const id = setInterval(() => {
+      const endAt = timerEndAtRef.current;
+      const paused = timerPausedRef.current;
+      if (endAt > 0) {
+        const remaining = Math.max(0, endAt - Date.now());
+        setTimerMilliRemaining(remaining);
+        setTimerIsRunning(true);
+        if (remaining === 0) {
+          // Timer finished
+          setTimerIsRunning(false);
+          timerEndAtRef.current = 0;
+        }
+      } else if (paused > 0) {
+        setTimerMilliRemaining(paused);
+        setTimerIsRunning(false);
+      } else {
+        if (timerMilliRemaining !== 0) setTimerMilliRemaining(0);
+        if (timerIsRunning) setTimerIsRunning(false);
+      }
+    }, 250);
+    return () => clearInterval(id);
+  });
 
   // ── Actions — existing ──────────────────────────────────────────────────
 
@@ -840,33 +857,43 @@ export function useLiveAnnotation(
     }
   }, [isSuspended]);
 
-  // ── Feature 5: timer controls ───────────────────────────────────────────
+  // ── Feature 5: timer controls (SharedMap-based) ────────────────────────
 
   const startTimer = useCallback((durationMs: number) => {
-    if (!timerRef.current) return;
-    try {
-      (timerRef.current as any).start(durationMs);
-    } catch (err) {
-      console.warn("[Markup] startTimer:", err);
-    }
+    const s = appStateRef.current;
+    if (!s) return;
+    const endAt = Date.now() + durationMs;
+    s.set("timer_endAt", String(endAt));
+    s.set("timer_paused", "");
+    timerEndAtRef.current = endAt;
+    timerPausedRef.current = 0;
+    console.log("[Markup] Timer started:", durationMs, "ms");
   }, []);
 
   const pauseTimer = useCallback(() => {
-    if (!timerRef.current) return;
-    try {
-      (timerRef.current as any).pause();
-    } catch (err) {
-      console.warn("[Markup] pauseTimer:", err);
-    }
+    const s = appStateRef.current;
+    if (!s) return;
+    const endAt = timerEndAtRef.current;
+    if (endAt <= 0) return;
+    const remaining = Math.max(0, endAt - Date.now());
+    s.set("timer_paused", String(remaining));
+    s.set("timer_endAt", "");
+    timerEndAtRef.current = 0;
+    timerPausedRef.current = remaining;
+    console.log("[Markup] Timer paused:", remaining, "ms remaining");
   }, []);
 
   const playTimer = useCallback(() => {
-    if (!timerRef.current) return;
-    try {
-      (timerRef.current as any).play();
-    } catch (err) {
-      console.warn("[Markup] playTimer:", err);
-    }
+    const s = appStateRef.current;
+    if (!s) return;
+    const remaining = timerPausedRef.current;
+    if (remaining <= 0) return;
+    const endAt = Date.now() + remaining;
+    s.set("timer_endAt", String(endAt));
+    s.set("timer_paused", "");
+    timerEndAtRef.current = endAt;
+    timerPausedRef.current = 0;
+    console.log("[Markup] Timer resumed:", remaining, "ms remaining");
   }, []);
 
   // ── Return ──────────────────────────────────────────────────────────────
