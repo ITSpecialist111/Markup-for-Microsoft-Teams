@@ -186,6 +186,7 @@ export function useLiveAnnotation(
   const presenceMapRef = useRef(new Map<string, PresenceUser>());
   const liveEventRef = useRef<LiveEvent | null>(null);
   const pinStateRef = useRef<LiveState | null>(null);
+  const pinsRef = useRef<BreadcrumbPin[]>([]);
   const followModeRef = useRef<LiveFollowMode | null>(null);
 
   // Timer refs (SharedMap-driven, not LiveTimer)
@@ -395,8 +396,11 @@ export function useLiveAnnotation(
               if (cancelled) return;
               try {
                 const v = typeof value === "string" ? value : JSON.stringify(value);
-                setPins(JSON.parse(v));
+                const parsed = JSON.parse(v);
+                pinsRef.current = parsed;
+                setPins(parsed);
               } catch {
+                pinsRef.current = [];
                 setPins([]);
               }
             }
@@ -408,7 +412,10 @@ export function useLiveAnnotation(
             if (raw) {
               const parsed =
                 typeof raw === "string" ? JSON.parse(raw) : raw;
-              if (Array.isArray(parsed)) setPins(parsed);
+              if (Array.isArray(parsed)) {
+                pinsRef.current = parsed;
+                setPins(parsed);
+              }
             }
           } catch { /* empty */ }
 
@@ -727,22 +734,15 @@ export function useLiveAnnotation(
   // ── Actions — pins (via LiveState with SharedMap fallback) ──────────────
 
   const dropPin = useCallback((xPct: number, yPct: number) => {
-    let current: BreadcrumbPin[] = [];
-
-    if (pinStateRef.current) {
-      try {
-        const raw = (pinStateRef.current as any).state;
-        current = typeof raw === "string" ? JSON.parse(raw) : Array.isArray(raw) ? raw : [];
-      } catch { current = []; }
-    } else {
-      const raw = appStateRef.current?.get<string>("pins");
-      current = raw ? JSON.parse(raw) : [];
-    }
+    // Always read from local ref — LiveState.state may lag behind after set()
+    const current = pinsRef.current;
 
     const next: BreadcrumbPin[] = [
       ...current,
       { id: current.length + 1, xPct, yPct },
     ];
+
+    pinsRef.current = next;
 
     if (pinStateRef.current) {
       (pinStateRef.current as any).set(JSON.stringify(next));
@@ -753,6 +753,7 @@ export function useLiveAnnotation(
   }, []);
 
   const clearPins = useCallback(() => {
+    pinsRef.current = [];
     if (pinStateRef.current) {
       (pinStateRef.current as any).set(JSON.stringify([]));
     } else {
