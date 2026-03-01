@@ -543,6 +543,10 @@ The InkingManager internally sets high z-index values on its canvases. To keep t
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
+## Disclaimer
+
+This project is provided "as is" without warranty of any kind. It is **not** a Microsoft product and is not endorsed or supported by Microsoft. See [DISCLAIMER.md](DISCLAIMER.md) for full terms including limitation of liability, data privacy responsibilities, and intellectual property notices.
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
