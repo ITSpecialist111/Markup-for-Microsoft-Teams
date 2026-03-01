@@ -141,6 +141,7 @@ interface LiveAnnotationState {
   startTimer: (durationMs: number) => void;
   pauseTimer: () => void;
   playTimer: () => void;
+  clearTimer: () => void;
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
@@ -896,6 +897,16 @@ export function useLiveAnnotation(
     console.log("[Markup] Timer resumed:", remaining, "ms remaining");
   }, []);
 
+  const clearTimer = useCallback(() => {
+    const s = appStateRef.current;
+    if (!s) return;
+    s.set("timer_endAt", "");
+    s.set("timer_paused", "");
+    timerEndAtRef.current = 0;
+    timerPausedRef.current = 0;
+    console.log("[Markup] Timer cleared");
+  }, []);
+
   // ── Return ──────────────────────────────────────────────────────────────
 
   return {
@@ -938,5 +949,6 @@ export function useLiveAnnotation(
     startTimer,
     pauseTimer,
     playTimer,
+    clearTimer,
   };
 }

@@ -85,6 +85,7 @@ export function MeetingStage() {
     startTimer,
     pauseTimer,
     playTimer,
+    clearTimer,
   } = useLiveAnnotation(canvasHostRef);
 
   const canAnnotate = currentRole === "annotator";
@@ -488,9 +489,9 @@ export function MeetingStage() {
               <span style={styles.peopleBadge}>{presenceUsers.length}</span>
             )}
           </button>
-          {showPeople && presenceUsers.length > 0 && (
+          {showPeople && (
             <div style={styles.presenceRoster}>
-              {presenceUsers.map((u) => (
+              {presenceUsers.length > 0 ? presenceUsers.map((u) => (
                 <div
                   key={u.userId}
                   style={{
@@ -514,7 +515,11 @@ export function MeetingStage() {
                     {u.name}{u.isLocal ? " (you)" : ""}
                   </span>
                 </div>
-              ))}
+              )) : (
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontStyle: "italic" }}>
+                  Connecting…
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -674,10 +679,16 @@ export function MeetingStage() {
                 </button>
               )}
               {!timerIsRunning && timerMilliRemaining > 0 && (
-                <button style={styles.powerBtn} onClick={playTimer} title="Resume timer">
-                  <SvgIcon d="M5 3l14 9-14 9V3z" size={14} />
-                  <span>Resume</span>
-                </button>
+                <>
+                  <button style={styles.powerBtn} onClick={playTimer} title="Resume timer">
+                    <SvgIcon d="M5 3l14 9-14 9V3z" size={14} />
+                    <span>Resume</span>
+                  </button>
+                  <button style={styles.powerBtn} onClick={clearTimer} title="Clear timer">
+                    <SvgIcon d="M18 6L6 18 M6 6l12 12" size={14} />
+                    <span>Stop</span>
+                  </button>
+                </>
               )}
               {showTimerDropdown && !timerIsRunning && timerMilliRemaining === 0 && (
                 <div style={styles.timerDropdown}>
@@ -1217,9 +1228,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   timerDropdown: {
     position: "absolute" as const,
-    top: "100%",
+    bottom: "100%",
     left: 0,
-    marginTop: 4,
+    marginBottom: 4,
     background: GLASS,
     backdropFilter: "blur(18px)",
     WebkitBackdropFilter: "blur(18px)",
