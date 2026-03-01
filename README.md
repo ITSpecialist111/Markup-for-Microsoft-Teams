@@ -11,6 +11,16 @@ Draw arrows, highlights, pins, and laser pointers over shared screen content —
 
 ---
 
+## Showcase
+
+<p align="center">
+  <img src="docs/markup-screenshot.png" alt="MarkUp for Teams — live annotation in a Teams meeting" width="900" />
+</p>
+
+> **MarkUp in action** — Numbered breadcrumb pins, freehand drawing, highlights, and the side panel all running inside a live Teams meeting. Annotations are synced in real-time to every participant via Microsoft Live Share.
+
+---
+
 ## Overview
 
 MarkUp for Teams lets meeting participants annotate over shared content in real-time. A presenter captures their screen into the app, and all organisers/presenters can draw over it — with strokes, pins, and zoom synced live to everyone.
@@ -40,19 +50,29 @@ There is no Teams SDK API to capture a remote presenter's screen ([confirmed by 
 |---|---|---|
 | Laser Pointer | Fades after ~2 seconds | "Look here" — temporary pointing |
 | Pen | Permanent strokes | Circling, underlining, free-form drawing |
-| Arrow / Line | Permanent with arrowhead | "This connects to that" |
+| Arrow / Line | Permanent with arrowhead (toggle on/off) | "This connects to that" |
 | Highlighter | Semi-transparent strokes | Highlighting regions of interest |
 | Eraser | Removes whole strokes | Cleaning up the canvas |
-| Color Picker | 8 presets + custom | Colour-code annotations by topic |
+| Color Picker | 7 presets + custom colour picker | Colour-code annotations by topic |
 
 ### Power-User Features
 
 | Feature | Description |
 |---|---|
-| **Breadcrumb Pins** | Drop numbered markers (1, 2, 3…) on the canvas. Connected by dashed guide lines. Synced to all participants via `SharedMap`. |
-| **Ghost Click Ripples** | Click anywhere to send a visible ripple animation to all participants — a "look here" signal without drawing. |
-| **Focus Zone** | Drag-select a region to auto-zoom for all participants. Supports up to 5x magnification with smooth easing. |
-| **Snapshot Export** | Composite the background image + annotations + pins into a single 2x-resolution PNG and download it. |
+| **Breadcrumb Pins** | Drop numbered markers (1, 2, 3…) on the canvas. Connected by dashed guide lines. Synced to all participants via `LiveState` with `SharedMap` fallback. |
+| **Ghost Click Ripples** | Click anywhere to send a visible ripple animation to all participants — a "look here" signal without drawing. Powered by `LiveEvent`. |
+| **Focus Zone** | Drag-select a region to auto-zoom for all participants. Supports up to 5× magnification with smooth easing. Powered by `LiveFollowMode`. |
+| **Snapshot Export** | Composite the background image + annotations + pins into a single 2×-resolution PNG and download it. |
+
+### Live Share Collaboration Features
+
+| Feature | SDK Class | Description |
+|---|---|---|
+| **Real-time Presence** | `LivePresence` | See who's in the session. Coloured cursors track each participant's pointer in real-time. People roster with user count badge. |
+| **Attention Requests** | `LiveEvent` | Viewers can ring a bell to request the presenter's attention — a toast notification appears for all participants. |
+| **Follow Mode** | `LiveFollowMode` | Presenters can lock all followers' views to a specific zoom/focus area. Followers can pause/resume following. |
+| **Shared Timer** | `SharedMap`-based | Start a countdown timer (1/3/5/10 min) visible to all participants. Pause, resume, and stop controls synced in real-time. |
+| **Synced Pins** | `LiveState` | Breadcrumb pins use `LiveState` for role-gated typed shared state, with `SharedMap` as a fallback. |
 
 ### Screen Capture Methods
 
@@ -60,7 +80,8 @@ Because Teams loads apps in a sandboxed iframe, `getDisplayMedia()` is blocked i
 
 | Method | How |
 |---|---|
-| Popup capture | Opens a helper window at `/capture.html` outside the iframe where `getDisplayMedia()` works. Frames are sent back via `window.opener.postMessage()`. |
+| Direct capture | Tries `getDisplayMedia()` directly first — works when running outside the Teams iframe. |
+| Popup capture | Opens a helper window at `/capture.html` outside the iframe where `getDisplayMedia()` works. Frames are sent back via `window.opener.postMessage()`. Supports "Go Live" continuous capture at configurable intervals. |
 | File upload | Click the upload button and select a screenshot from disk. |
 | Clipboard paste | Press `Ctrl+V` / `Cmd+V` to paste a screenshot from the clipboard. |
 
@@ -102,14 +123,18 @@ flowchart TB
         direction LR
         LC["LiveCanvas\nink strokes + cursors"]
         SM["SharedMap"]
+        LP["LivePresence\nuser awareness"]
+        LE["LiveEvent\nnotifications"]
+        LS["LiveState\ntyped shared state"]
+        LFM["LiveFollowMode\npresenter focus"]
     end
     
     subgraph SHARED_STATE["SharedMap Keys"]
         direction LR
         K1["backgroundImage\nbase64 JPEG"]
-        K2["pins\nJSON array"]
-        K3["lastClick\nripple event"]
-        K4["focusZone\ncrop rect"]
+        K2["timer_endAt\nepoch ms"]
+        K3["timer_paused\nremaining ms"]
+        K4["focusZone\ncrop rect (fallback)"]
     end
     
     SP_BTN -->|"Opens stage for all"| STAGE
@@ -120,6 +145,10 @@ flowchart TB
     INK <-->|"Real-time sync"| LC
     BG <-->|"Push & receive"| SM
     OVERLAY <-->|"Push & receive"| SM
+    OVERLAY <-->|"Pins"| LS
+    OVERLAY <-->|"Focus zone"| LFM
+    OVERLAY <-->|"Click / attention"| LE
+    OVERLAY <-->|"Cursors / roster"| LP
     SM --- SHARED_STATE
     
     style TEAMS fill:#1e1e2e,stroke:#6366f1,stroke-width:2px,color:#e2e8f0
@@ -154,19 +183,31 @@ sequenceDiagram
     FR-->>V: Strokes appear in real-time
     
     Note over A: Annotator drops a pin
-    A->>FR: SharedMap.set("pins", JSON)
-    FR-->>P: Pin marker appears
-    FR-->>V: Pin marker appears
+    A->>FR: LiveState.set(pins JSON)
+    FR-->>P: stateChanged → pin marker appears
+    FR-->>V: stateChanged → pin marker appears
     
     Note over A: Annotator sets focus zone
-    A->>FR: SharedMap.set("focusZone", JSON)
-    FR-->>P: View zooms to region
-    FR-->>V: View zooms to region
+    A->>FR: LiveFollowMode.update(zone)
+    FR-->>P: stateChanged → view zooms to region
+    FR-->>V: stateChanged → view zooms to region
     
     Note over A: Annotator clicks (ghost ripple)
-    A->>FR: SharedMap.set("lastClick", JSON)
-    FR-->>P: Ripple animation plays
-    FR-->>V: Ripple animation plays
+    A->>FR: LiveEvent.send(click)
+    FR-->>P: received → ripple animation plays
+    FR-->>V: received → ripple animation plays
+
+    Note over V: Viewer requests attention
+    V->>FR: LiveEvent.send(attention)
+    FR-->>P: received → toast notification appears
+    FR-->>A: received → toast notification appears
+
+    Note over A: Annotator starts timer
+    A->>FR: SharedMap.set("timer_endAt", epoch)
+    FR-->>P: valueChanged → timer display updates
+    FR-->>V: valueChanged → timer display updates
+
+    Note over P,V: LivePresence syncs user cursors + roster throughout
 ```
 
 ### Role-Based Access
@@ -213,7 +254,12 @@ flowchart LR
 | `LiveShareClient` | `@microsoft/live-share` | Joins the Fluid container, authenticates via Teams |
 | `InkingManager` | `@microsoft/live-share-canvas` | Attaches a `<canvas>` to the DOM, handles all drawing tools |
 | `LiveCanvas` | `@microsoft/live-share-canvas` | Syncs InkingManager strokes + cursors to all participants |
-| `SharedMap` | `fluid-framework` | Stores background image, pins, focus zone, and click events |
+| `LivePresence` | `@microsoft/live-share` | Tracks connected users with custom data (name, colour, cursor position, role) |
+| `LiveEvent` | `@microsoft/live-share` | Fire-and-forget notifications — ghost click ripples + attention requests |
+| `LiveState` | `@microsoft/live-share` | Typed shared state for breadcrumb pins (role-gated) |
+| `LiveFollowMode` | `@microsoft/live-share` | Presenter/follower focus-zone control with suspend/resume |
+| `LiveTimer` | `@microsoft/live-share` | Kept in container schema for compatibility (timer uses SharedMap instead — see [Lessons Learned](#lessons-learned)) |
+| `SharedMap` | `fluid-framework` | Stores background image, timer state, and acts as fallback for all DDS features |
 | `UserMeetingRole` | `@microsoft/live-share` | Enum for Organizer / Presenter / Attendee roles |
 
 ---
@@ -236,12 +282,14 @@ Role detection uses `LiveShareHost.getClientRoles()` after audience sync. If aud
 
 ```
 markup-for-teams/
+├── docs/
+│   └── markup-screenshot.png   ← Showcase screenshot
 ├── manifest/
 │   ├── manifest.json           ← Teams app manifest
 │   ├── color.png               ← 192×192 colour icon
 │   └── outline.png             ← 32×32 monochrome outline icon
 ├── public/
-│   ├── index.html              ← SPA shell
+│   ├── index.html              ← SPA shell (dark theme, Teams lifecycle styles)
 │   ├── capture.html            ← Popup window for screen capture outside iframe
 │   └── staticwebapp.config.json ← Azure SWA routing rules
 ├── infra/
@@ -249,14 +297,14 @@ markup-for-teams/
 │   ├── swa.bicep               ← Azure Static Web App resource definition
 │   └── main.parameters.json    ← azd parameter bindings
 ├── src/
-│   ├── App.tsx                 ← Entry point — routes by Teams frameContext
+│   ├── App.tsx                 ← Entry point — Teams SDK init + frame routing
 │   ├── index.tsx               ← React root
 │   ├── hooks/
-│   │   └── useLiveAnnotation.ts ← Core hook: Live Share connection, SharedMap, all actions
+│   │   └── useLiveAnnotation.ts ← Core hook: Live Share connection, 6 DDS features, all actions
 │   └── components/
-│       ├── MeetingStage.tsx     ← Full-screen stage: canvas, toolbars, pins, focus, export
+│       ├── MeetingStage.tsx     ← Full-screen stage: canvas, toolbars, pins, presence, timer
 │       ├── AnnotationToolbar.tsx ← Drawing tool buttons (pen, laser, arrow, highlighter, eraser)
-│       ├── ScreenCaptureButton.tsx ← Screen capture / upload / paste toolbar
+│       ├── ScreenCaptureButton.tsx ← Screen capture / upload / paste / Go Live toolbar
 │       ├── SidePanel.tsx        ← Side panel: Share to Stage + instructions
 │       └── ConfigPage.tsx       ← Required by Teams for configurable tabs
 ├── azure.yaml                  ← Azure Developer CLI (azd) service definition
@@ -278,8 +326,8 @@ markup-for-teams/
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<your-org>/markup-for-teams.git
-cd markup-for-teams
+git clone https://github.com/ITSpecialist111/Markup-for-Microsoft-Teams.git
+cd Markup-for-Microsoft-Teams
 npm install --legacy-peer-deps
 ```
 
@@ -426,9 +474,14 @@ MarkUp is a **zero-data-storage** application. No meeting content, user data, or
 
 | Data | Transport | Persistence |
 |---|---|---|
-| Ink strokes (pen, arrow, laser) | Microsoft Fluid Relay (Teams meeting session) | Meeting duration only — disposed when session ends |
-| Background image (screen capture) | Fluid `SharedMap` (Microsoft infrastructure) | Meeting duration only |
-| Pins, focus zone, click events | Fluid `SharedMap` (Microsoft infrastructure) | Meeting duration only |
+| Ink strokes (pen, arrow, laser) | `LiveCanvas` via Fluid Relay | Meeting duration only — disposed when session ends |
+| Background image (screen capture) | `SharedMap` via Fluid Relay | Meeting duration only |
+| Breadcrumb pins | `LiveState` (primary) / `SharedMap` (fallback) | Meeting duration only |
+| Focus zone | `LiveFollowMode` (primary) / `SharedMap` (fallback) | Meeting duration only |
+| Ghost click ripples | `LiveEvent` (primary) / `SharedMap` (fallback) | Fire-and-forget — not persisted |
+| Attention requests | `LiveEvent` | Fire-and-forget — not persisted |
+| Timer state | `SharedMap` (`timer_endAt`, `timer_paused`) | Meeting duration only |
+| User presence & cursors | `LivePresence` | Meeting duration only |
 | Static app files (JS/CSS/HTML) | Azure Static Web Apps CDN (or your host) | Permanent (contains no user data) |
 
 ### What is NOT collected or stored
@@ -500,6 +553,51 @@ The InkingManager creates `<canvas>` elements that capture all pointer events. I
 
 The InkingManager internally sets high z-index values on its canvases. To keep toolbars clickable, set `zIndex: 0` on the canvas container div (creating a stacking context) and `zIndex: 10` on the toolbar wrapper.
 
+### 6. LiveTimer uses `requestAnimationFrame` — unreliable in iframes
+
+`LiveTimer` internally uses `requestAnimationFrame` for tick callbacks. In Teams iframes (and any hidden/backgrounded tab), the browser throttles or pauses `requestAnimationFrame`, making the timer appear frozen. **Use SharedMap instead:**
+
+```typescript
+// Store endAt epoch in SharedMap — each client computes remaining locally
+appState.set("timer_endAt", String(Date.now() + durationMs));
+
+// Local tick via setInterval (not requestAnimationFrame)
+setInterval(() => {
+  const remaining = Math.max(0, endAt - Date.now());
+  setTimerMilliRemaining(remaining);
+}, 250);
+```
+
+### 7. LivePresence.getUsers() may return empty initially
+
+After calling `presence.update()`, `presence.getUsers()` can return an empty array because the Fluid relay round-trip hasn't completed. The `presenceChanged` event may also not fire for the local user's own update. **Mitigations:**
+- Seed the roster with the local user immediately (don't wait for LivePresence)
+- Poll `getUsers()` on a 2-second interval as a fallback
+- Only overwrite the seeded roster when `getUsers()` returns actual data
+
+### 8. Teams desktop requires `app.notifyAppLoaded()` + `app.notifySuccess()`
+
+The Teams web client renders the iframe content immediately, but the **desktop client** shows its own loading overlay until the app signals readiness. Without these calls, the side panel appears blank:
+
+```typescript
+await app.initialize();
+app.notifyAppLoaded();   // Dismiss loading overlay
+app.notifySuccess();     // Signal successful initialization
+```
+
+### 9. LiveState reads may be stale immediately after `set()`
+
+`LiveState.state` doesn't update synchronously after calling `.set()`. If you call `set()` then immediately read `.state`, you'll get the old value. For features that need rapid sequential updates (like dropping multiple pins quickly), **maintain a local ref** that mirrors the latest state:
+
+```typescript
+const pinsRef = useRef<BreadcrumbPin[]>([]);
+// Always read from ref, not from LiveState.state
+const current = pinsRef.current;
+const next = [...current, newPin];
+pinsRef.current = next;
+liveState.set(JSON.stringify(next));
+```
+
 ---
 
 ## Known Limitations
@@ -516,12 +614,12 @@ The InkingManager internally sets high z-index values on its canvases. To keep t
 ## Future Enhancements
 
 - **Blob Storage for screenshots** — upload to Azure Blob Storage and sync just the URL (reduces Fluid payload)
-- **LivePresence cursors** — coloured cursors showing each participant's pointer in real-time
 - **Persistent annotations** — save annotations to a SharedMap so they survive reconnections
 - **Request to annotate** — attendees request permission; organisers approve via a LiveEvent
 - **Page/slide tracking** — sync current page number and clear annotations on page change
 - **Stamp templates** — pre-built annotation stamps (checkmark, X, question mark) for faster markup
 - **Session recording** — replay a timestamped sequence of annotations after the meeting
+- **Multi-page support** — maintain separate annotation layers per page/slide
 
 ---
 
