@@ -41,5 +41,9 @@ export default function App() {
   if (view === "config") return <ConfigPage />;
   if (view === "sidePanel") return <SidePanel />;
   if (view === "meetingStage") return <MeetingStage />;
-  return <div>This app only runs inside a Teams meeting.</div>;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'rgba(255,255,255,0.5)', fontSize: 14, fontFamily: "'Segoe UI', sans-serif" }}>
+      This app only runs inside a Teams meeting.
+    </div>
+  );
 }

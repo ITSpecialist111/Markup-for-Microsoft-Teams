@@ -319,7 +319,11 @@ export function useLiveAnnotation(
 
           // Populate roster immediately (catches anyone already in session)
           refreshPresence();
-
+          // Poll presence as a fallback — the first getUsers() often returns
+          // empty because the Fluid relay round-trip hasn't completed yet.
+          const presencePoller = setInterval(() => refreshPresence(), 2000);
+          // Store for cleanup
+          (presenceRef as any).__poller = presencePoller;
           console.log("[Markup] ✓ LivePresence initialised");
         } catch (err) {
           console.warn("[Markup] ✗ LivePresence:", err);
@@ -632,6 +636,10 @@ export function useLiveAnnotation(
       inkingManagerRef.current?.deactivate();
       if (appStateRef.current && valueChangedHandlerRef.current) {
         appStateRef.current.off("valueChanged", valueChangedHandlerRef.current);
+      }
+      // Clean up presence polling interval
+      if ((presenceRef as any).__poller) {
+        clearInterval((presenceRef as any).__poller);
       }
     };
   }, []); // Run once on mount

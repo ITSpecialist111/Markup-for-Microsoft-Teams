@@ -155,6 +155,7 @@ const S: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 22,
+    overflowY: "auto",
   },
 
   /* ── Hero ──────────────────────────────────────────────────────────── */
