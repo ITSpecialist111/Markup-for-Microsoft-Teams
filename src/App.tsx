@@ -16,6 +16,9 @@ export default function App() {
   useEffect(() => {
     // Initialize the Teams JS SDK — MUST be called before any other SDK calls
     app.initialize().then(() => {
+      // Notify Teams the app has loaded (required by desktop client)
+      app.notifyAppLoaded();
+      app.notifySuccess();
       app.getContext().then((ctx) => {
         switch (ctx.page?.frameContext) {
           case FrameContexts.sidePanel:

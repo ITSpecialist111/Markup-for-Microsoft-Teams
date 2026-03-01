@@ -232,6 +232,15 @@ export function useLiveAnnotation(
         if (!cancelled) {
           setLocalUserName(userName);
           setLocalUserColor(userColor);
+          // Seed the roster with the local user immediately so People
+          // never shows "Connecting…" — LivePresence will enrich later.
+          setPresenceUsers([{
+            userId: "local",
+            name: userName,
+            color: userColor,
+            role: "viewer",
+            isLocal: true,
+          }]);
         }
 
         // ── 2. Join the Fluid container ───────────────────────────────────
@@ -301,7 +310,11 @@ export function useLiveAnnotation(
                   isLocal: !!u.isLocalUser,
                 });
               }
-              setPresenceUsers(all);
+              // If LivePresence returned users, use them; otherwise keep
+              // the seeded local user so roster is never empty.
+              if (all.length > 0) {
+                setPresenceUsers(all);
+              }
             } catch (err) {
               console.warn("[Markup] refreshPresence error:", err);
             }
