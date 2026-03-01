@@ -33,7 +33,8 @@ MarkUp for Teams lets meeting participants annotate over shared content in real-
 
 ### The Problem This Solves
 
-There is no Teams SDK API to capture a remote presenter's screen ([confirmed by Microsoft](https://learn.microsoft.com/en-us/answers/questions/1207197/microsoft-teams-sdk-screen-capture)). MarkUp works around this:
+There is no Teams SDK API to capture a remote presenter's screen. Take control is available but depends on Teams policies, security implications etc.
+MarkUp works around this:
 
 1. Both parties open the app in the meeting stage
 2. The presenter clicks **Capture Screen** — their screen is grabbed via `getDisplayMedia()` and pushed as a JPEG into a Fluid `SharedMap`
